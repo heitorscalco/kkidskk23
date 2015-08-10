@@ -1,6 +1,6 @@
 //Heitor Scalco Neto 
 //Mestrado DCC - UFLA
-//08/08/2015
+//10/08/2015
 //Compilar: gcc -o cap_module cap_module.c -lpcap
 #include <pcap.h>
 #include <stdio.h>
@@ -10,11 +10,7 @@
 #include <errno.h>
 #include <sys/types.h>
 #include <sys/socket.h>
-#include <netinet/in.h>
-#include <netinet/tcp.h>
-#include <netinet/udp.h>
-//#include <netinet/ip.h>
-#include <netinet/ip_icmp.h>
+//#include <netinet/in.h>
 #include <arpa/inet.h>
 
 /* default snap length (maximum bytes per packet to capture) */
@@ -61,8 +57,6 @@ struct cabecalho_ip {
 };
 
 #define IP_ISFRAG(cabecalho_ip)    (((cabecalho_ip)->ip_off & htons(IP_MF | IP_OFFMASK)) != 0)
-//#define IP_FIRSTFRAG(cabecalho_ip) (((cabecalho_ip)->ip_off & htons(IP_OFFMASK)) == 0)
-
 
 /* TCP header */
 typedef u_int tcp_seq;
@@ -107,6 +101,24 @@ struct cabecalho_udp {
 	};
 };
 
+struct cabecalho_icmp {
+  u_int8_t type;			/* message type */
+  u_int8_t code;			/* type sub-code */
+  u_int16_t checksum;
+  union {
+    struct {
+      u_int16_t	id;
+      u_int16_t	sequence;
+    } echo;					/* echo datagram */
+    u_int32_t	gateway;	/* gateway address */
+    struct {
+      u_int16_t	__glibc_reserved;
+      u_int16_t	mtu;
+    } frag;					/* path mtu discovery */
+  } un;
+};
+
+#define TIMESTAMP 8
 
 
 char* preprocessing_int(char buffer[300], int campo, int add_virgula){
@@ -140,109 +152,14 @@ char* print_hexa(const u_char *payload, int len, int offset){
 	return retorno;
 }
 
-// void print_hex_ascii_line(const u_char *payload, int len, int offset){
-// 	int i;
-// 	int gap;
-// 	const u_char *ch;
-
-// 	/* offset */
-// 	printf("%05d   ", offset);
-	
-// 	/* hex */
-// 	ch = payload;
-// 	for(i = 0; i < len; i++) {
-// 		printf("%02x ", *ch);
-// 		ch++;
-// 		/* print extra space after 8th byte for visual aid */
-// 		if (i == 7)
-// 			printf(" ");
-// 	}
-// 	/* print space to handle line less than 8 bytes */
-// 	if (len < 8)
-// 		printf(" ");
-	
-// 	/* fill hex gap with spaces if not full line */
-// 	if (len < 16) {
-// 		gap = 16 - len;
-// 		for (i = 0; i < gap; i++) {
-// 			printf("   ");
-// 		}
-// 	}
-// 	printf("   ");
-	
-// 	/* ascii (if printable) */
-// 	ch = payload;
-// 	for(i = 0; i < len; i++) {
-// 		if (isprint(*ch))
-// 			printf("%c", *ch);
-// 		else
-// 			printf(".");
-// 		ch++;
-// 	}
-
-// 	printf("\n");
-
-// 	return;
-// }
-
-// void print_payload(const u_char *payload, int len) {
-
-// 	int len_rem = len;
-// 	int line_width = 16;			/* number of bytes per line */
-// 	int line_len;
-// 	int offset = 0;					/* zero-based offset counter */
-// 	const u_char *ch = payload;
-
-// 	if (len <= 0)
-// 		return;
-
-// 	/* data fits on one line */
-// 	if (len <= line_width) {
-// 		print_hex_ascii_line(ch, len, offset);
-// 		return;
-// 	}
-
-// 	/* data spans multiple lines */
-// 	for ( ;; ) {
-// 		/* compute current line length */
-// 		line_len = line_width % len_rem;
-// 		/* print line */
-// 		print_hex_ascii_line(ch, line_len, offset);
-// 		/* compute total remaining */
-// 		len_rem = len_rem - line_len;
-// 		/* shift pointer to remaining bytes to print */
-// 		ch = ch + line_len;
-// 		/* add offset */
-// 		offset = offset + line_width;
-// 		/* check if we have line width chars or less */
-// 		if (len_rem <= line_width) {
-// 			/* print last line and get out */
-// 			print_hex_ascii_line(ch, len_rem, offset);
-// 			break;
-// 		}
-// 	}
-
-// return;
-// }
-
-
 char* get_payload_part(const u_char *payload, int len, int qtd_bytes){		
-	int offset = 0;					/* zero-based offset counter */
+	int offset = 0;
 	const u_char *ch = payload;
 	char *payload_final;
-
 	if (len <= 0)
 		return;
-
-	// printf("\n\n\nIMPRIME OS PRIMEIROS 5 BYTES \n\n\n\n");
-	payload_final = print_hexa(ch, qtd_bytes, offset);
-	// printf("Payload Final: %s\n",  payload_final);
-	// printf("\n\n\nIMPRIME OS ÚLTIMOS 5 BYTES \n\n\n\n");
-
-	//printf("TAMANHO do Payload: %lu\n", sizeof(ch));
-
-	strcat(payload_final, print_hexa(ch = (ch + len-qtd_bytes), qtd_bytes, offset));	
-	// printf("Payload Final: %s\n",  payload_final);
+	payload_final = print_hexa(ch, qtd_bytes, offset); //5 primeiros
+	strcat(payload_final, print_hexa(ch = (ch + len-qtd_bytes), qtd_bytes, offset)); //5 últimos
 	return payload_final;
 }
 
@@ -272,14 +189,15 @@ void got_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *pa
 	const struct cabecalho_ip *ip;          //CABEÇALHO IP	
 	struct cabecalho_tcp *tcp;            	//CABEÇALHO TCP
 	struct cabecalho_udp *udp; 			  	//CABEÇALHO UDP	
-	//struct cabecalho_icmp *icmp; 			//CABEÇALHO ICMP	
+	const struct cabecalho_icmp *icmp; 		//CABEÇALHO ICMP	
 	const char *payload;              		//PAYLOAD DO PACOTE
 	
 	int size_ip=0, 
 		size_tcp=0, 
 		size_payload = 0, 
 		i=0, 
-		size_udp = 0;	
+		size_udp = 0,
+		size_icmp = 0;	
 
 	char str[10] = "0", aux_vector[2] = "0";	
 	char buffer[200];	
@@ -293,13 +211,12 @@ void got_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *pa
 	size_ip = ip->ip_hl*4;
 
 	if (size_ip < 20) {
-		printf("* Tamanho do cabeçalho IP inválido: %u bytes\n", size_ip);
+		//printf("* Tamanho do cabeçalho IP inválido: %u bytes\n", size_ip);
 		return;
 	}	
 
 	switch(ip->ip_p) {
-		case IPPROTO_TCP:					
-
+		case IPPROTO_TCP: //TCP
 			tcp = (struct cabecalho_tcp*)(packet + SIZE_ETHERNET + size_ip);
 			size_tcp = TH_OFF(tcp)*4;
 			if (size_tcp < 20) {
@@ -340,62 +257,95 @@ void got_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *pa
 			preprocessing_int(buffer,  tcp->th_flags, 1);
 			preprocessing_int(buffer,  ntohs(tcp->th_win), 1);
 			preprocessing_int(buffer,  tcp->th_urp, 1);						
+			//Deixa todos com o mesmo numero de colunas
+			strcat(buffer, "0,0,0,0,");				
+
 
 			if(size_payload > 0)	{
 				strcat(buffer, get_payload_part(payload, size_payload, NUM_BYTES_GET)); //10 campos	
 			} else {
 				for(i=0; i<NUM_BYTES_GET*2;i++){
-					strcat(buffer, "none,");	
+					strcat(buffer, "0,");	
 				}				
 			}			
 			break;
 
-		case IPPROTO_UDP:												
-			//UDP
-			
-			//struct udphdr *udph = (struct udphdr*)(packet + size_ip  + SIZE_ETHERNET);
+		case IPPROTO_UDP: //UDP			
 			udp = (struct cabecalho_udp*)(packet + size_ip  + SIZE_ETHERNET);
-			size_udp =  sizeof(struct sniff_ethernet) + size_ip + sizeof udp;
+			size_udp =  sizeof(struct sniff_ethernet) + size_ip + sizeof udp;		
 
-			printf("ID: %d\n", ntohs(ip->ip_id));
-			printf("Source Port: %d\n", ntohs(udp->source) );
-			printf("Destination Port: %d\n", ntohs(udp->dest));
-			printf("Length: %d\n", ntohs(udp->len));
-			printf("Header size: %d\n", size_udp);
-			printf("IP Len: %d\n", ntohs(ip->ip_len));
-			printf("IP HDRLen: %d\n", size_ip);
-			printf("Size UDP: %lu\n", sizeof udp);
-
+			strcpy(buffer, "udp,");
+			preprocessing_int(buffer, ip->ip_hl, 1);
+			preprocessing_int(buffer,  ntohs(ip->ip_len), 1);
+			preprocessing_int(buffer,  ntohs(ip->ip_id), 1);
+			getBin(ip->ip_off, str, 3);
+			strncpy(aux_vector, str, 3);
+			preprocessing_int(buffer,  bin_to_dec(atoi(aux_vector)), 1);
+			preprocessing_int(buffer,  IP_ISFRAG(ip), 1); //Verificar resultado quando esta setado.
+			preprocessing_int(buffer,  ip->ip_ttl, 1);
+			preprocessing_int(buffer,  ntohs(udp->source), 1);
+			preprocessing_int(buffer,  ntohs(udp->dest), 1);
+			//Deixa todos com o mesmo numero de colunas
+			strcat(buffer, "0,0,0,");				
+			preprocessing_int(buffer,  ntohs(udp->len), 1);
+			//Deixa todos com o mesmo numero de colunas
+			strcat(buffer, "0,0,0,0,");
 
 			payload = (u_char *)(packet + size_udp);
-			size_payload = (header->len) - SIZE_ETHERNET - size_ip - sizeof udp;	
+			size_payload = (header->len) - SIZE_ETHERNET - size_ip - sizeof udp;
 			if(size_payload > 0){
-				//printf("DATA PAYLOAD\n");
-				//print_hexa(const u_char *payload, int len, int offset){			
-				//printf("Size payload: %d\n", size_payload);	
-				//printf("header len: %d\n", header->len);		
-
-				strcpy(buffer, get_payload_part(payload, size_payload, NUM_BYTES_GET)); //10 campos	
-				printf("BUFFER: %s\n\n\n", buffer );
-				//print_payload(payload, size_payload);
-			}
-			printf("\n\n\n\n");			
+				strcat(buffer, get_payload_part(payload, size_payload, NUM_BYTES_GET)); //10 campos
+			} else {
+				for(i=0; i<NUM_BYTES_GET*2;i++){
+					strcat(buffer, "none,");	
+				}				
+			}						
 			break;
-		case IPPROTO_ICMP:
-			printf("   Protocol: ICMP\n");
-			return;
-		// case IPPROTO_IP:
-		// 	printf("   Protocol: IP\n");
-		// 	return;
+
+		case IPPROTO_ICMP: //icmp
+			icmp = (struct cabecalho_icmp*)(packet + size_ip  + SIZE_ETHERNET);
+			size_icmp =  sizeof(struct sniff_ethernet) + size_ip + sizeof icmp;
+			payload = (u_char *)(packet + size_icmp);			
+			size_payload = (header->len) - SIZE_ETHERNET - size_ip - sizeof icmp;						
+
+			strcpy(buffer, "icmp,");
+			preprocessing_int(buffer, ip->ip_hl, 1);
+			preprocessing_int(buffer,  ntohs(ip->ip_len), 1);
+			preprocessing_int(buffer,  ntohs(ip->ip_id), 1);
+			getBin(ip->ip_off, str, 3);
+			strncpy(aux_vector, str, 3);
+			preprocessing_int(buffer,  bin_to_dec(atoi(aux_vector)), 1);
+			preprocessing_int(buffer,  IP_ISFRAG(ip), 1); //Verificar resultado quando esta setado.
+			preprocessing_int(buffer,  ip->ip_ttl, 1);
+			//Deixa todos com o mesmo numero de colunas
+			strcat(buffer, "0,0,0,0,0,0,");
+
+			//icmp
+			preprocessing_int(buffer,   icmp->type, 1);
+			preprocessing_int(buffer,   icmp->code, 1);
+			preprocessing_int(buffer,   ntohs(icmp->un.echo.id), 1);
+			preprocessing_int(buffer,   ntohs(icmp->un.echo.sequence), 1);
+			// strcat(buffer, "PAYLOAD: ");			
+
+			if(size_payload > 0){
+				//Verificar se a base de dados desconta o timestamp nos dados.
+				strcat(buffer, get_payload_part(payload, size_payload, NUM_BYTES_GET)); //10 campos
+			} else {
+				for(i=0; i<NUM_BYTES_GET*2;i++){
+					strcat(buffer, "none,");	
+				}				
+			}	
+			break;		
+	
 		default:
-			printf("   Protocol: unknown\n");
+			printf("   Protocol: Unknown\n");
 			return;
 	}		
 
-	printf("Buffer Final: %s\n", buffer);										
-	printf ("\n\n\n");		
+	printf("%s\n", buffer);										
 
-return;
+	return;
+
 }
 
 
@@ -404,8 +354,8 @@ int main(int argc, char *argv[]){
 	
 	char *interface = NULL, errbuf[5000];
 	pcap_t *handle;		
-	//char filtro[] = "tcp or udp or icmp";
-	char filtro[] = "tcp or udp";
+	char filtro[] = "ip and (udp or tcp or icmp)";
+	
 
 	struct bpf_program fp;	 	//Filter expression
 		   bpf_u_int32 mask; 	//Network Mask
@@ -427,10 +377,9 @@ int main(int argc, char *argv[]){
 		 buffer = atoi(argv[2]);
 	}
 
-	const char *hexstring = "17";
-	int number = (int)strtol(hexstring, NULL, 16);
-
-	printf("Numero: %d\n", number);
+	if(argv[3] != NULL){
+		 strcpy(filtro, argv[3]);
+	}
 
 	//Se retornar erro é -1.
 	if (pcap_lookupnet(interface, &net, &mask, errbuf) == -1) {
@@ -443,7 +392,7 @@ int main(int argc, char *argv[]){
 	printf("Filtro aplicado: %s\n", filtro);
 	printf("Pacotes para coletar: %d\n\n", buffer);
 	
-	printf("Se essa não for a interface requerida,\nexecute o programa com a interface como parâmetro. \nExemplo: ./<programa> <interface> \n\n\n");
+	printf("Para outra IF \nexecute o programa com a interface como parâmetro. \nExemplo: ./<programa> <interface> \n\n\n");
 	
 
 	//*dev é a interface;
@@ -472,7 +421,7 @@ int main(int argc, char *argv[]){
 
 	//Aplica o filtro compilado.
 	if (pcap_setfilter(handle, &fp) == -1) {
-		fprintf(stderr, "Couldn't install filter %s: %s\n",filtro, pcap_geterr(handle));
+		fprintf(stderr, "Não foi possível aplicar o filtro %s: %s\n",filtro, pcap_geterr(handle));
 		return(2);
 	}
 	
