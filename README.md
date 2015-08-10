@@ -1,4 +1,3 @@
 # kkidskk23
 
-Esse é o readme teste do repositório.
-Esse é o readme teste do repositorio.2
+Projeto e implementação de um Network Intrusion Detection System.
